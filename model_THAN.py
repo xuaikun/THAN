@@ -1,3 +1,12 @@
+"""This model shows an example of using dgl.metapath_reachable_graph on the original heterogeneous
+graph.
+
+Because the original HAN implementation only gives the preprocessed homogeneous graph, this model
+could not reproduce the result in HAN as they did not provide the preprocessing code, and we
+constructed another dataset from ACM with a different set of papers, connections, features and
+labels.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,6 +32,7 @@ def LinearChange(res, dst_feat_D):
     dst_feat = fc(res)
     # print("dst_feat =", dst_feat, dst_feat.shape)
     dst_feat = Ba(dst_feat)
+    # 比relu强多了
     dst_feat = F.leaky_relu(dst_feat)
     # dst_feat = F.softmax(dst_feat, dim=1)
     dst_feat = Dr(dst_feat)
@@ -78,6 +88,92 @@ class NodetypeAttention(nn.Module):
         # -->语义级中的公式(9)
         return (beta * z).sum(1)                       # (N, D * K)
 
+class HANLayer(nn.Module):
+    """
+    HAN layer.
+
+    Arguments
+    ---------
+    meta_paths : list of metapaths, each as a list of edge types
+    in_size : input feature dimension
+    out_size : output feature dimension
+    layer_num_heads : number of attention heads
+    dropout : Dropout probability
+
+    Inputs
+    ------
+    g : DGLHeteroGraph
+        The heterogeneous graph
+    h : tensor
+        Input features
+
+    Outputs
+    -------
+    tensor
+        The output feature
+    """
+    def __init__(self, meta_paths, in_size, out_size, layer_num_heads, dropout):
+        super(HANLayer, self).__init__()
+        print("THAN HANlayer-->")
+        # One GAT layer for each meta path based adjacency matrix
+        # --> 节点级注意力？
+        self.gat_layers = nn.ModuleList()
+        for i in range(len(meta_paths)):
+            # HAN基于元路径的操作使用gat
+            '''
+            self.gat_layers.append(GATConv(in_size, out_size, layer_num_heads,
+                                           dropout, dropout, residual=False, activation=F.elu,
+                                           allow_zero_in_degree=True))
+
+            '''
+            # HeCo在基于元路径操作处，使用gcn操作
+            self.gat_layers.append(GraphConv(in_size, out_size * layer_num_heads))
+        # np,show()
+        # --> 语义级注意力？
+        self.semantic_attention = SemanticAttention(in_size=out_size * layer_num_heads)
+        self.meta_paths = list(tuple(meta_path) for meta_path in meta_paths)
+        self._cached_graph = None
+        self._cached_coalesced_graph = {}
+
+    def forward(self, g, h):
+        # print("HANlayer-->forward")
+        # -->当前的feature只属于目标分类节点
+        # -->考虑将其它节点的feature也融入进来
+        # print("h =", h)
+        # np, show()
+        # -->语义嵌入-->节点级注意力
+        semantic_embeddings = []
+        # import dgl
+        # ourg = dgl.heterograph({('A', 'AB', 'B'): ([0, 1, 2], ['syz']),
+        #                        ('B', 'BA', 'A'): (['syz'], [0, 1, 2])})
+        # print(ourg)
+        # new_g = dgl.metapath_reachable_graph(ourg, ['AB', 'BA'])
+        # print(new_g)
+        # print(new_g.edges(order='eid'))
+        # np,show()
+        if self._cached_graph is None or self._cached_graph is not g:
+            self._cached_graph = g
+            self._cached_coalesced_graph.clear()
+            for meta_path in self.meta_paths:
+                self._cached_coalesced_graph[meta_path] = dgl.metapath_reachable_graph(
+                        g, meta_path)
+
+        for i, meta_path in enumerate(self.meta_paths):
+            # print(i, meta_path)
+            new_g = self._cached_coalesced_graph[meta_path]
+            # print("new_g =", new_g.metagraph)
+            # np,show()
+            # -->h:节点特征-->?似乎只是分类节点的特征
+            # print("self.gat_layers[i](new_g, h).flatten(1) =", self.gat_layers[i](new_g, h).flatten(1))
+            # print("self.gat_layers[i](new_g, h).shape) =", self.gat_layers[i](new_g, h).shape)
+
+            # np,show()
+            semantic_embeddings.append(self.gat_layers[i](new_g, h).flatten(1))
+        # --> 语义嵌入
+        semantic_embeddings = torch.stack(semantic_embeddings, dim=1)                  # (N, M, D * K)
+        # --> 语义嵌入：semantic_embeddings-->用于语义注意力的输入
+        # -->语义级注意力
+        return self.semantic_attention(semantic_embeddings)                            # (N, D * K)
 
 class THANLayer(nn.Module):
     """
