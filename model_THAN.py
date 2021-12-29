@@ -6,6 +6,7 @@ could not reproduce the result in HAN as they did not provide the preprocessing 
 constructed another dataset from ACM with a different set of papers, connections, features and
 labels.
 """
+import math
 
 import torch
 import torch.nn as nn
@@ -19,7 +20,7 @@ import dgl.function as fn
 
 path = '../p38dglproject/dataset/output/'
 who = 'beijing'
-
+hid_dim = 8
 # 线性变换-->降维
 # 输入：需要降维的tensor，需要输出的维度
 # 输出：返回修改维度的tensor
@@ -135,6 +136,13 @@ class HANLayer(nn.Module):
         self._cached_graph = None
         self._cached_coalesced_graph = {}
 
+        self.predict = nn.Linear( out_size*layer_num_heads, out_size * layer_num_heads)
+
+        self.GRU_hub = nn.GRUCell(hid_dim * layer_num_heads, hid_dim * layer_num_heads)
+        nn.init.xavier_uniform_(self.GRU_hub.weight_ih, gain=math.sqrt(2.0))
+        nn.init.xavier_uniform_(self.GRU_hub.weight_hh,gain=math.sqrt(2.0))
+
+
     def forward(self, g, h):
         # print("HANlayer-->forward")
         # -->当前的feature只属于目标分类节点
@@ -174,6 +182,11 @@ class HANLayer(nn.Module):
         # --> 语义嵌入：semantic_embeddings-->用于语义注意力的输入
         # -->语义级注意力
         return self.semantic_attention(semantic_embeddings)                            # (N, D * K)
+        # HMTRL
+        # semantic_embeddings_temp = semantic_embeddings[0]
+        # h_hub = torch.zeros(h.shape[0], hid_dim*8)
+        # semantic_embeddings_temp = self.GRU_hub(semantic_embeddings_temp, h_hub)
+        # return self.predict(semantic_embeddings_temp)
 
 class THANLayer(nn.Module):
     """
@@ -208,11 +221,11 @@ class THANLayer(nn.Module):
         # pid_gat
         # 二部图（源节点，目标节点），输出特征
         self.pid_gat = GATConv((pid_size, in_size), out_size, layer_num_heads,
-                               dropout, dropout, residual=False, activation=F.leaky_relu,
+                               dropout, dropout, residual=True, activation=F.leaky_relu,
                                allow_zero_in_degree=True)
         # gat
         self.od_gat = GATConv((od_size, in_size), out_size, layer_num_heads,
-                              dropout, dropout, residual=False, activation=F.leaky_relu,
+                              dropout, dropout, residual=True, activation=F.leaky_relu,
                               allow_zero_in_degree=True)
 
         # np,show()
@@ -338,14 +351,14 @@ class HAN(nn.Module):
         # od_pid_gat
         # 二部图（源节点，目标节点），输出特征-->out_size不能等于本身维度，其他都行
         self.od_pid_gat = GATConv((od_size, pid_size), od_size, num_heads[0],
-                                           dropout, dropout, residual=False, activation=F.leaky_relu,
+                                           dropout, dropout, residual=True, activation=F.leaky_relu,
                                            allow_zero_in_degree=True)
 
         # self.od_pid_gat = GraphConv(od_size, od_size, norm='both', weight=True, bias=True)
 
         # pid_od_gat
         self.pid_od_gat = GATConv((pid_size, od_size), pid_size, num_heads[0],
-                               dropout, dropout, residual=False, activation=F.leaky_relu,
+                               dropout, dropout, residual=True, activation=F.leaky_relu,
                                allow_zero_in_degree=True)
 
         # self.pid_od_gat = GraphConv(pid_size, pid_size, norm='both', weight=True, bias=True)
@@ -391,7 +404,7 @@ class HAN(nn.Module):
     #  （1）分组验证“鲁棒性”，
     #  （2）超参数敏感性：同质和异构向量维度变化，多头注意力的头的数量
     # forward_TAHN
-    def forward_THAN(self, g, h, pid_h, o_h, d_h, o_d_g, d_o_g, od_h, o_d_od_ID_data, o_d_count):
+    def forward(self, g, h, pid_h, o_h, d_h, o_d_g, d_o_g, od_h, o_d_od_ID_data, o_d_count):
         print("forward_TAHN")
         # 节点原始特征做好备份
         temp_h = h
@@ -952,8 +965,10 @@ class HAN(nn.Module):
 
     # THAN: 多二部图嵌入，异构节点：gat，元路径（同质节点）：gat，有残差，// 无多二部图嵌入
     # forward_than_MBigraphE
-    def forward_than_MBigraphE(self, g, h, pid_h, o_h, d_h, o_d_g, d_o_g, od_h, o_d_od_ID_data, o_d_count):
+    # -->an do no resnet and no MBigraphE
+    def forward_MBigraphE(self, g, h, pid_h, o_h, d_h, o_d_g, d_o_g, od_h, o_d_od_ID_data, o_d_count):
         print("forward_than_MBigraphE")
+        # np,show()
         # 节点原始特征做好备份
         temp_h = h
         # print("THAN HAN-->forward")
@@ -1367,7 +1382,7 @@ class HAN(nn.Module):
 
     # 多二部图嵌入，异构节点-->gcn(直接操作异构图)，元路径-->gcn或gat，异于HeCo和HAN
     # forward_gcngcn
-    def forward(self, g, h, pid_h, o_h, d_h, o_d_g, d_o_g, od_h, o_d_od_ID_data, o_d_count):
+    def forward_gcngcn(self, g, h, pid_h, o_h, d_h, o_d_g, d_o_g, od_h, o_d_od_ID_data, o_d_count):
         print("gcngcn")
         # 节点原始特征做好备份
         temp_h = h

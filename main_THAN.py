@@ -1,8 +1,9 @@
 import torch
 import numpy as np
 import pandas as pd
-from sklearn.metrics import f1_score, precision_score, recall_score, ndcg_score
+from sklearn.metrics import f1_score, precision_score, recall_score, ndcg_score, confusion_matrix, ConfusionMatrixDisplay
 from torch.utils.data import DataLoader
+from matplotlib import pyplot as plt
 
 from utils_THAN import load_data, EarlyStopping, get_binary_mask
 
@@ -24,6 +25,15 @@ def get_weighted_fscore(dic_, y_pred, y_true):
         f_score += dic_[i] * f1_score(y_true=yt, y_pred=yp)
     return f_score
 
+# 多分类->f1_weight
+def get_weighted_fscore1(dic_, y_pred, y_true):
+    f_score = 0
+    for i in range(11):
+        yt = y_true == i
+        yp = y_pred == i
+        f_score += dic_[i] * f1_score(y_true=yt, y_pred=yp)
+    return f_score
+
 def score(logits, labels):
     # 统计标签中每个值所占比例
     df_analysis = pd.DataFrame()
@@ -35,12 +45,29 @@ def score(logits, labels):
     _, indices = torch.max(logits, dim=1)
     # 预测标签
     prediction = indices.long().cpu().numpy()
+    # 节点实际标签
+    labels = labels.cpu().numpy()
+
     # 对应每个标签的分数，一定是二维数组
     y_score = np.zeros([1, logits.shape[0]], dtype=np.float64)
     for i in range(0, logits.shape[0]):
         y_score[0][i] = logits[i][prediction[i]]
-    # 节点实际标签
-    labels = labels.cpu().numpy()
+    '''
+    print("prediction =", prediction)
+    print("label_new =", labels)
+    print(confusion_matrix(labels, prediction))
+    confusion_mat_new = confusion_matrix(labels, prediction)
+    confusion_mat = confusion_mat_new.astype('float')/confusion_mat_new.sum(axis=1)[:, np.newaxis]
+    confusion_mat = np.around(confusion_mat, decimals=2)
+    print("confusion_mat.shape : {}".format(confusion_mat.shape))
+    print("confusion_mat : {}".format(confusion_mat))
+    classes = ["0", "1", "2", "3", "4", "5", "6", "7", "8",
+               "9", "10"]
+    disp = ConfusionMatrixDisplay(confusion_matrix=confusion_mat, display_labels=classes)
+    disp.plot(include_values=True, cmap='viridis', ax=None, xticks_rotation="horizontal", values_format=".2g")
+    plt.title("Normalized confusion matrix of THAN")
+    plt.show()
+    '''
     # 标签重新赋值，构成二维数组
     y_values = np.zeros([1, labels.shape[0]], dtype=float)
     for i in range(0, labels.shape[0]):
@@ -59,14 +86,93 @@ def score(logits, labels):
 
     return accuracy, micro_f1, macro_f1, f1_weighted, Pre, Rec, NDCG, f_score
 
+def score1(logits, labels):
+    # 统计标签中每个值所占比例
+    df_analysis = pd.DataFrame()
+    df_analysis['label'] = labels
+    dic_ = df_analysis['label'].value_counts(normalize=True)
+    # logits-->是一个对应训练集数量X交通方式数量的二维数组，其中每一行的值
+    # 表示为：该节点预测为每种交通方式的概率：共11个概率
+    # 其中_应该对应交通方式的概率或者得分,indices对应最大得分的id->即为交通方式
+    _, indices = torch.max(logits, dim=1)
+    # 预测标签
+    prediction = indices.long().cpu().numpy()
+    # 节点实际标签
+    labels = labels.cpu().numpy()
+
+    # 对应每个标签的分数，一定是二维数组
+    y_score = np.zeros([1, logits.shape[0]], dtype=np.float64)
+    for i in range(0, logits.shape[0]):
+        y_score[0][i] = logits[i][prediction[i]]
+    '''
+    print("prediction =", prediction)
+    print("label_new =", labels)
+    print(confusion_matrix(labels, prediction))
+    confusion_mat_new = confusion_matrix(labels, prediction)
+    confusion_mat = confusion_mat_new.astype('float')/confusion_mat_new.sum(axis=1)[:, np.newaxis]
+    confusion_mat = np.around(confusion_mat, decimals=2)
+    print("confusion_mat.shape : {}".format(confusion_mat.shape))
+    print("confusion_mat : {}".format(confusion_mat))
+    classes = ["0", "1", "2", "3", "4", "5", "6", "7", "8",
+               "9", "10"]
+    disp = ConfusionMatrixDisplay(confusion_matrix=confusion_mat, display_labels=classes)
+    disp.plot(include_values=True, cmap='viridis', ax=None, xticks_rotation="horizontal", values_format=".2g")
+    plt.title("Normalized confusion matrix of THAN")
+    plt.show()
+    '''
+    # 标签重新赋值，构成二维数组
+    y_values = np.zeros([1, labels.shape[0]], dtype=float)
+    for i in range(0, labels.shape[0]):
+        y_values[0][i] = labels[i]
+    # 获得多分类f1值
+    # f_score = get_weighted_fscore1(dic_, labels, prediction)
+
+    accuracy = (prediction == labels).sum() / len(prediction)
+    micro_f1 = f1_score(labels, prediction, average='micro')
+    macro_f1 = f1_score(labels, prediction, average='macro')
+    f1_weighted = f1_score(labels, prediction, average='weighted')
+    Pre = precision_score(labels, prediction, average='weighted', zero_division=1)
+    Rec = recall_score(labels, prediction, average='weighted')
+    # 输入值均为二维数组，所调用函数已经解释了哦，留意看！！！
+    NDCG = ndcg_score(y_values, y_score)
+    f_score = f1_weighted
+    return accuracy, micro_f1, macro_f1, f1_weighted, Pre, Rec, NDCG, f_score
+
 def evaluate(model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, mask, loss_func, o_d_od_ID_data, o_d_count):
     model.eval()
     with torch.no_grad():
         logits = model(g, features, pid_features, o_features, d_features, o_d_g, d_o_g, od_features, o_d_od_ID_data, o_d_count)
     loss = loss_func(logits[mask], labels[mask])
     accuracy, micro_f1, macro_f1, f1_weighted, Pre, Rec, NDCG, f_score = score(logits[mask], labels[mask])
+    _, indices = torch.max(logits[mask], dim=1)
+    # 预测标签
+    prediction = indices.long().cpu().numpy()
+    # 节点实际标签
+    labels_new = labels[mask]
+    labels_new = labels_new.cpu().numpy()
 
-    return loss, accuracy, micro_f1, macro_f1, f1_weighted, Pre, Rec, NDCG, f_score
+    # print("prediction =", prediction)
+    # print("labels_new =", labels_new)
+
+    return loss, accuracy, micro_f1, macro_f1, f1_weighted, Pre, Rec, NDCG, f_score, labels_new, prediction
+
+def evaluate1(model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, mask, loss_func, o_d_od_ID_data, o_d_count):
+    model.eval()
+    with torch.no_grad():
+        logits = model(g, features, pid_features, o_features, d_features, o_d_g, d_o_g, od_features, o_d_od_ID_data, o_d_count)
+    loss = loss_func(logits[mask], labels[mask])
+    accuracy, micro_f1, macro_f1, f1_weighted, Pre, Rec, NDCG, f_score = score1(logits[mask], labels[mask])
+    _, indices = torch.max(logits[mask], dim=1)
+    # 预测标签
+    prediction = indices.long().cpu().numpy()
+    # 节点实际标签
+    labels_new = labels[mask]
+    labels_new = labels_new.cpu().numpy()
+
+    # print("prediction =", prediction)
+    # print("labels_new =", labels_new)
+
+    return loss, accuracy, micro_f1, macro_f1, f1_weighted, Pre, Rec, NDCG, f_score, labels_new, prediction
 
 def main(args):
     # If args['hetero'] is True, g would be a heterogeneous graph.
@@ -87,6 +193,7 @@ def main(args):
         test_mask_1 = test_mask_1.bool()
         test_mask_2 = test_mask_2.bool()
         test_mask_3 = test_mask_3.bool()
+
     # mode特征
     features = features.to(args['device'])
     # pid特征
@@ -104,6 +211,7 @@ def main(args):
     test_mask_1 = test_mask_1.to(args['device'])
     test_mask_2 = test_mask_2.to(args['device'])
     test_mask_3 = test_mask_3.to(args['device'])
+
 
     o_d_count = o_d_count.to(args['device'])
 
@@ -136,6 +244,7 @@ def main(args):
                 num_heads=args['num_heads'],
                 dropout=args['dropout']).to(args['device'])
     g = g.to(args['device'])
+    dropout = args['dropout']
     # o与d之间的二部图
     o_d_g = o_d_g.to(args['device'])
     d_o_g = d_o_g.to(args['device'])
@@ -178,7 +287,7 @@ def main(args):
 
         train_acc, train_micro_f1, train_macro_f1, train_f1_weighted, train_Pre, train_Rec, train_NDCG, train_f_score = score(
             logits[train_mask], labels[train_mask])
-        val_loss, val_acc, val_micro_f1, val_macro_f1, val_f1_weighted, val_Pre, val_Rec, val_NDCG, val_f_score = evaluate(model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, val_mask, loss_fcn, o_d_od_ID_data, o_d_count)
+        val_loss, val_acc, val_micro_f1, val_macro_f1, val_f1_weighted, val_Pre, val_Rec, val_NDCG, val_f_score, _, _ = evaluate(model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, val_mask, loss_fcn, o_d_od_ID_data, o_d_count)
         early_stop = stopper.step(val_loss.data.item(), val_acc, model)
 
         print(
@@ -187,9 +296,9 @@ def main(args):
             epoch + 1, loss.item(), train_micro_f1, train_macro_f1, train_f1_weighted, train_Pre, train_Rec,
             train_NDCG, train_f_score, val_loss.item(), val_micro_f1, val_macro_f1, val_f1_weighted, val_Pre,
             val_Rec, val_NDCG, val_f_score))
-
+        '''
         if epoch == 1:
-            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
                 model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask,
                 loss_fcn, o_d_od_ID_data, o_d_count)
             print(
@@ -197,14 +306,14 @@ def main(args):
                     test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
                     test_f_score))
 
-            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
                 model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask_0,
                 loss_fcn, o_d_od_ID_data, o_d_count)
             print(
                 'Test loss {:.4f} | Test Micro f1 {:.4f} | Test Macro f1 {:.4f} | Test f1_weighted {:.4f} | Test Pre {:.4f} | Test Rec {:.4f} | Test NDCG {:.4f} | Test f1_score {:.4f}'.format(
                     test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
                     test_f_score))
-            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
                 model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask_1,
                 loss_fcn, o_d_od_ID_data, o_d_count)
             print(
@@ -212,7 +321,7 @@ def main(args):
                     test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
                     test_f_score))
 
-            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
                 model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask_2,
                 loss_fcn, o_d_od_ID_data, o_d_count)
             print(
@@ -220,14 +329,32 @@ def main(args):
                     test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
                     test_f_score))
 
-            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+            test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
                 model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask_3,
                 loss_fcn, o_d_od_ID_data, o_d_count)
             print(
                 'Test loss {:.4f} | Test Micro f1 {:.4f} | Test Macro f1 {:.4f} | Test f1_weighted {:.4f} | Test Pre {:.4f} | Test Rec {:.4f} | Test NDCG {:.4f} | Test f1_score {:.4f}'.format(
                     test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
                     test_f_score))
-
+        '''
+        '''
+        # logits-->是一个对应训练集数量X交通方式数量的二维数组，其中每一行的值
+        # 表示为：该节点预测为每种交通方式的概率：共11个概率
+        # 其中_应该对应交通方式的概率或者得分,indices对应最大得分的id->即为交通方式
+        _, indices = torch.max(logits, dim=1)
+        # 预测标签
+        prediction = indices.long().cpu().numpy()
+        # 节点实际标签
+        labels = labels.cpu().numpy()
+        print("prediction =", prediction)
+        print("label =", labels)
+        print(confusion_matrix(labels, prediction))
+        confusion_mat = confusion_matrix(labels, prediction)
+        print("confusion_mat.shape : {}".format(confusion_mat.shape))
+        print("confusion_mat : {}".format(confusion_mat))
+        classes = ["Mode 0", "Mode 1", "Mode 2", "Mode 3", "Mode 4", "Mode 5", "Mode 6", "Mode 7", "Mode 8",
+                   "Mode 9", "Mode 10"]
+        '''
         # np,show()
         if early_stop:
             break
@@ -236,7 +363,9 @@ def main(args):
     stopper.load_checkpoint(model)
     # print(model)
     # print(stopper.load_checkpoint(model))
-    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+
+
+    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score,labels_new, prediction = evaluate(
         model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask,
         loss_fcn, o_d_od_ID_data, o_d_count)
     print(
@@ -244,31 +373,49 @@ def main(args):
             test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
             test_f_score))
 
-    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
         model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask_0, loss_fcn, o_d_od_ID_data, o_d_count)
     print('Test loss {:.4f} | Test Micro f1 {:.4f} | Test Macro f1 {:.4f} | Test f1_weighted {:.4f} | Test Pre {:.4f} | Test Rec {:.4f} | Test NDCG {:.4f} | Test f1_score {:.4f}'.format(
         test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score))
-    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+
+    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
         model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask_1,
         loss_fcn, o_d_od_ID_data, o_d_count)
     print(
         'Test loss {:.4f} | Test Micro f1 {:.4f} | Test Macro f1 {:.4f} | Test f1_weighted {:.4f} | Test Pre {:.4f} | Test Rec {:.4f} | Test NDCG {:.4f} | Test f1_score {:.4f}'.format(
             test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
             test_f_score))
-    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
         model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask_2,
         loss_fcn, o_d_od_ID_data, o_d_count)
     print(
         'Test loss {:.4f} | Test Micro f1 {:.4f} | Test Macro f1 {:.4f} | Test f1_weighted {:.4f} | Test Pre {:.4f} | Test Rec {:.4f} | Test NDCG {:.4f} | Test f1_score {:.4f}'.format(
             test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
             test_f_score))
-    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score = evaluate(
+    test_loss, test_acc, test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG, test_f_score, _, _ = evaluate(
         model, g, o_d_g, d_o_g, features, pid_features, o_features, d_features, od_features, labels, test_mask_3,
         loss_fcn, o_d_od_ID_data, o_d_count)
     print(
         'Test loss {:.4f} | Test Micro f1 {:.4f} | Test Macro f1 {:.4f} | Test f1_weighted {:.4f} | Test Pre {:.4f} | Test Rec {:.4f} | Test NDCG {:.4f} | Test f1_score {:.4f}'.format(
             test_loss.item(), test_micro_f1, test_macro_f1, test_f1_weighted, test_Pre, test_Rec, test_NDCG,
             test_f_score))
+
+    #print("prediction =", prediction)
+    #print("label_new =", labels_new)
+    #print(confusion_matrix(labels_new, prediction))
+    np.savetxt("labels.txt", labels_new)
+    np.savetxt("prediction.txt", prediction)
+    confusion_mat_new = confusion_matrix(labels_new, prediction)
+    confusion_mat = confusion_mat_new.astype('float') / confusion_mat_new.sum(axis=1)[:, np.newaxis]
+    confusion_mat = np.around(confusion_mat, decimals=2)
+    #print("confusion_mat.shape : {}".format(confusion_mat.shape))
+    #print("confusion_mat : {}".format(confusion_mat))
+    classes = ["1", "2", "3", "4", "5", "6", "7", "8",
+               "9", "10", "11"]
+    disp = ConfusionMatrixDisplay(confusion_matrix=confusion_mat, display_labels=classes)
+    disp.plot(include_values=True, cmap='viridis', ax=None, xticks_rotation="horizontal", values_format=".2g")
+    plt.title("Normalized confusion matrix of THAN")
+    plt.show()
 
 
 # python main.py -->使用原作者的数据-->处理好的数据
