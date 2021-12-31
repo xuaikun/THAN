@@ -109,9 +109,9 @@ def main(args):
     test_mask_3 = test_mask_3.to(args['device'])
     o_d_count = o_d_count.to(args['device'])
 
-    from model_THAN import HAN
+    from model_THAN import THAN
     # 包含pid和od
-    model = HAN(meta_paths=[['pa', 'ap'], ['pf', 'fp']],
+    model = THAN(meta_paths=[['pa', 'ap'], ['pf', 'fp']],
                 in_size=features.shape[1],
                 # pid 特征维度
                 pid_size=pid_features.shape[1],
