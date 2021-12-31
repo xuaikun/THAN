@@ -74,75 +74,27 @@ class NodetypeAttention(nn.Module):
         return (beta * z).sum(1)                       # (N, D * K)
 
 class HANLayer(nn.Module):
-    """
-    HAN layer.
-
-    Arguments
-    ---------
-    meta_paths : list of metapaths, each as a list of edge types
-    in_size : input feature dimension
-    out_size : output feature dimension
-    layer_num_heads : number of attention heads
-    dropout : Dropout probability
-
-    Inputs
-    ------
-    g : DGLHeteroGraph
-        The heterogeneous graph
-    h : tensor
-        Input features
-
-    Outputs
-    -------
-    tensor
-        The output feature
-    """
     def __init__(self, meta_paths, in_size, out_size, layer_num_heads, dropout):
         super(HANLayer, self).__init__()
-        print("THAN HANlayer-->")
         # One GAT layer for each meta path based adjacency matrix
         # --> 节点级注意力？
         self.gat_layers = nn.ModuleList()
         for i in range(len(meta_paths)):
             # HAN基于元路径的操作使用gat
-            '''
             self.gat_layers.append(GATConv(in_size, out_size, layer_num_heads,
                                            dropout, dropout, residual=False, activation=F.elu,
                                            allow_zero_in_degree=True))
 
-            '''
-            # HeCo在基于元路径操作处，使用gcn操作
-            self.gat_layers.append(GraphConv(in_size, out_size * layer_num_heads))
-        # np,show()
         # --> 语义级注意力？
         self.semantic_attention = SemanticAttention(in_size=out_size * layer_num_heads)
         self.meta_paths = list(tuple(meta_path) for meta_path in meta_paths)
         self._cached_graph = None
         self._cached_coalesced_graph = {}
 
-        self.predict = nn.Linear( out_size*layer_num_heads, out_size * layer_num_heads)
-
-        self.GRU_hub = nn.GRUCell(hid_dim * layer_num_heads, hid_dim * layer_num_heads)
-        nn.init.xavier_uniform_(self.GRU_hub.weight_ih, gain=math.sqrt(2.0))
-        nn.init.xavier_uniform_(self.GRU_hub.weight_hh,gain=math.sqrt(2.0))
-
 
     def forward(self, g, h):
-        # print("HANlayer-->forward")
-        # -->当前的feature只属于目标分类节点
-        # -->考虑将其它节点的feature也融入进来
-        # print("h =", h)
-        # np, show()
         # -->语义嵌入-->节点级注意力
         semantic_embeddings = []
-        # import dgl
-        # ourg = dgl.heterograph({('A', 'AB', 'B'): ([0, 1, 2], ['syz']),
-        #                        ('B', 'BA', 'A'): (['syz'], [0, 1, 2])})
-        # print(ourg)
-        # new_g = dgl.metapath_reachable_graph(ourg, ['AB', 'BA'])
-        # print(new_g)
-        # print(new_g.edges(order='eid'))
-        # np,show()
         if self._cached_graph is None or self._cached_graph is not g:
             self._cached_graph = g
             self._cached_coalesced_graph.clear()
@@ -151,57 +103,17 @@ class HANLayer(nn.Module):
                         g, meta_path)
 
         for i, meta_path in enumerate(self.meta_paths):
-            # print(i, meta_path)
             new_g = self._cached_coalesced_graph[meta_path]
-            # print("new_g =", new_g.metagraph)
-            # np,show()
-            # -->h:节点特征-->?似乎只是分类节点的特征
-            # print("self.gat_layers[i](new_g, h).flatten(1) =", self.gat_layers[i](new_g, h).flatten(1))
-            # print("self.gat_layers[i](new_g, h).shape) =", self.gat_layers[i](new_g, h).shape)
-
-            # np,show()
             semantic_embeddings.append(self.gat_layers[i](new_g, h).flatten(1))
         # --> 语义嵌入
         semantic_embeddings = torch.stack(semantic_embeddings, dim=1)                  # (N, M, D * K)
         # --> 语义嵌入：semantic_embeddings-->用于语义注意力的输入
         # -->语义级注意力
         return self.semantic_attention(semantic_embeddings)                            # (N, D * K)
-        # HMTRL
-        # semantic_embeddings_temp = semantic_embeddings[0]
-        # h_hub = torch.zeros(h.shape[0], hid_dim*8)
-        # semantic_embeddings_temp = self.GRU_hub(semantic_embeddings_temp, h_hub)
-        # return self.predict(semantic_embeddings_temp)
 
 class THANLayer(nn.Module):
-    """
-    THAN layer.
-
-    Arguments
-    ---------
-    meta_paths : list of metapaths, each as a list of edge types
-    in_size : input feature dimension
-    out_size : output feature dimension
-    layer_num_heads : number of attention heads
-    dropout : Dropout probability
-
-    Inputs
-    ------
-    g : DGLHeteroGraph
-        The heterogeneous graph
-    h : tensor
-        Input features
-
-    Outputs
-    -------
-    tensor
-        The output feature
-    """
     def __init__(self, in_size, pid_size, od_size, out_size, layer_num_heads, dropout):
         super(THANLayer, self).__init__()
-        print("THAN HANlayer-->")
-        # One GAT layer for each meta path based adjacency matrix
-        # --> 节点级注意力？
-
         # pid_gat
         # 二部图（源节点，目标节点），输出特征
         self.pid_gat = GATConv((pid_size, in_size), out_size, layer_num_heads,
@@ -212,46 +124,12 @@ class THANLayer(nn.Module):
                               dropout, dropout, residual=True, activation=F.leaky_relu,
                               allow_zero_in_degree=True)
 
-        # np,show()
         # --> 语义级注意力？
         self.nodetype_attention = NodetypeAttention(in_size=out_size * layer_num_heads)
-        # self.meta_paths = list(tuple(meta_path) for meta_path in meta_paths)
-        # self._cached_graph = None
-        # self._cached_coalesced_graph = {}
 
     def forward(self, temp_h, pid_g, pid_h, od_g, od_h):
-        # print("HANlayer-->forward")
-        # -->当前的feature只属于目标分类节点
-        # -->考虑将其它节点的feature也融入进来
-        # print("h =", h)
-        # np, show()
         # -->节点类型嵌入-->节点级注意力
         nodetype_embeddings = []
-        # import dgl
-        # ourg = dgl.heterograph({('A', 'AB', 'B'): ([0, 1, 2], ['syz']),
-        #                        ('B', 'BA', 'A'): (['syz'], [0, 1, 2])})
-        # print(ourg)
-        # new_g = dgl.metapath_reachable_graph(ourg, ['AB', 'BA'])
-        # print(new_g)
-        # print(new_g.edges(order='eid'))
-        # np,show()
-        # if self._cached_graph is None or self._cached_graph is not g:
-        #    self._cached_graph = g
-        #    self._cached_coalesced_graph.clear()
-        #    for meta_path in self.meta_paths:
-        #        self._cached_coalesced_graph[meta_path] = dgl.metapath_reachable_graph(
-        #                g, meta_path)
-
-        # for i, meta_path in enumerate(self.meta_paths):
-            # print(i, meta_path)
-        #    new_g = self._cached_coalesced_graph[meta_path]
-            # print("new_g =", new_g.metagraph)
-            # np,show()
-            # -->h:节点特征-->?似乎只是分类节点的特征
-            # print("self.gat_layers[i](new_g, h).flatten(1) =", self.gat_layers[i](new_g, h).flatten(1))
-            # print("self.gat_layers[i](new_g, h).shape) =", self.gat_layers[i](new_g, h).shape)
-
-            # np,show()
         nodetype_embeddings.append(self.pid_gat(pid_g, (pid_h, temp_h)).flatten(1))
         nodetype_embeddings.append(self.od_gat(od_g, (od_h, temp_h)).flatten(1))
         # --> 语义嵌入
@@ -262,7 +140,6 @@ class THANLayer(nn.Module):
 # --异构节点类型级注意力
 class HybridAttention(nn.Module):
     def __init__(self, in_size, hidden_size=64):
-        print("THAN SemanticAttention-->")
         super(HybridAttention, self).__init__()
         # -->映射有点像单层MLP-->为了计算权重w
         self.project = nn.Sequential(
@@ -274,20 +151,14 @@ class HybridAttention(nn.Module):
         )
 
     def forward(self, z):
-        # print("SemanticAttention-->foward")
-        # -->z来自语义嵌入semantic_embeddings
-        # -->映射公式(7)-->求每条mata-path的权重
         w = self.project(z).mean(0)                    # (M, 1)
-        # -->归一化操作公式(8)
         beta = torch.softmax(w, dim=0)                 # (M, 1)
         beta = beta.expand((z.shape[0],) + beta.shape) # (N, M, 1)
-        # -->语义级中的公式(9)
         return (beta * z).sum(1)                       # (N, D * K)
 
-class HAN(nn.Module):
+class THAN(nn.Module):
     def __init__(self, meta_paths, in_size, pid_size, o_size, d_size, od_size, hidden_size, out_size, num_heads, dropout):
-        super(HAN, self).__init__()
-        print("THAN HAN-->")
+        super(THAN, self).__init__()
         self.layers = nn.ModuleList()
         self.layers.append(HANLayer(meta_paths, in_size, hidden_size, num_heads[0], dropout))
         # 多头注意力机制(公式5)，num_heads为次数
@@ -315,20 +186,9 @@ class HAN(nn.Module):
         self.predict2 = nn.Linear(in_size, out_size, bias=True)
 
         # 二部图（源节点，目标节点），输出特征-->out_size不能等于本身维度，其他都行
-        '''
-        self.o_d_gat = GATConv((o_size, d_size), o_size, num_heads[0],
-                                  dropout, dropout, residual=True, activation=F.leaky_relu,
-                                  allow_zero_in_degree=True)
-        '''
         # 源->目标-->gcn
         self.o_d_gat = GraphConv(o_size, o_size, norm='both', weight=True, bias=True)#, activation=torch.tanh)
 
-        '''
-        # d_o_gat
-        self.d_o_gat = GATConv((d_size, o_size), d_size, num_heads[0],
-                                  dropout, dropout, residual=True, activation=F.leaky_relu,
-                                  allow_zero_in_degree=True)
-        '''
         # 源->目标-->gcn
         self.d_o_gat = GraphConv(d_size, d_size, norm='both', weight=True, bias=True)#, activation=torch.tanh)
 
@@ -338,14 +198,11 @@ class HAN(nn.Module):
                                            dropout, dropout, residual=True, activation=F.leaky_relu,
                                            allow_zero_in_degree=True)
 
-        # self.od_pid_gat = GraphConv(od_size, od_size, norm='both', weight=True, bias=True)
-
         # pid_od_gat
         self.pid_od_gat = GATConv((pid_size, od_size), pid_size, num_heads[0],
                                dropout, dropout, residual=True, activation=F.leaky_relu,
                                allow_zero_in_degree=True)
 
-        # self.pid_od_gat = GraphConv(pid_size, pid_size, norm='both', weight=True, bias=True)
         # 恢复o维度
         self.recover_o_D = nn.Linear(d_size, o_size, bias=True)
         # 恢复d维度
@@ -402,36 +259,22 @@ class HAN(nn.Module):
         # -------->重新将o + d -> od将o和d合并为od<--------
         # 更新o节点特征
         res0 = self.o_d_gat(o_d_g, (o_h, d_h))  # , edge_weight=o_d_count)
-        # print("res0 =", res0, res0.shape)
         # 降维操作-->gcn可不用-->无多头注意力机制
-        # res0 = res0.mean(axis=1, keepdim=False)  # 均值后变为二维
-        # print("res0 =", res0, res0.shape)
         # 更新d节点特征
         res1 = self.d_o_gat(d_o_g, (d_h, o_h))  # , edge_weight=o_d_count)
-        # print("res1 =", res1, res1.shape)
         # 降维操作-->gcn可不用-->无多头注意力机制
-        # res1 = res1.mean(axis=1, keepdim=False)  # 均值后变为二维
-        # print("res1 =", res1, res1.shape)
 
         # 线性变化：恢复o_h,d_h维度
         o_h = self.recover_o_D(res1)
-        # print("o_h =", o_h, o_h.shape)
         d_h = self.recover_d_D(res0)
-        # print("d_h =", d_h, d_h.shape)
         o_h = o_h.detach().numpy()
         d_h = d_h.detach().numpy()
-
-        # print("o_h =", o_h, o_h.shape)
-        # print("d_h =", d_h, d_h.shape)
         o_h = pd.DataFrame(o_h)
         d_h = pd.DataFrame(d_h)
-        # o_df = pd.DataFrame(train_click_pid)
         o_df = o_h.reset_index()
         d_df = d_h.reset_index()
         o_h['o_ID'] = range(len(o_df))
         d_h['d_ID'] = range(len(d_df))
-        # print("o_h =", o_h, o_h.shape)
-        # print("d_h =", d_h, d_h.shape)
         # 循环读操作，肯定存在固定耗时，看看如何放出去外面操作
         # o_d_od_ID_data = pd.read_csv((path + who + '/o_d_od_ID_data.csv'))
         o_d_od_ID_data = o_d_od_ID_data.detach().numpy()
@@ -459,22 +302,6 @@ class HAN(nn.Module):
         # 将o和d维度生成的特征转换为od维度的特征
         od_h = self.recover_o_d_to_od_D(od_h)
         #  -----> o + d -->od   <--------
-
-        '''
-        # ----->可考虑加上频率，作为权重<--------
-        pid_od_count = pd.read_csv(path + who + '/pid_od_count.csv')
-        del pid_od_count['Unnamed: 0']
-        # print("pid_od_count", pid_od_count)
-        # g.num_nodes('paper') 为当前sid的数量
-        # print("g.num_nodes('paper') =", g.num_nodes('paper'))
-        pid_od_count = pid_od_count[:g.num_nodes('paper')]
-        # pd.DataFrame to numpy
-        pid_od_count = pid_od_count.values
-        # print("od_count =", od_count, od_count.shape)
-        # 从二维降为一维
-        pid_od_count = pid_od_count.reshape(-1, 1)
-        # print("pid_od_count", pid_od_count)
-        '''
         # 二部图节点序列
         pid_m = g.edges('all', etype='pa')
         od_m = g.edges('all', etype='pf')
@@ -482,44 +309,6 @@ class HAN(nn.Module):
         od_pid_g = dgl.heterograph({('srt_type', 'srt_dst_type', 'dst_type'): (od_m[1], pid_m[1])})
         # 构建pid_od二部图，学习od节点特征
         pid_od_g = dgl.heterograph({('srt_type', 'srt_dst_type', 'dst_type'): (pid_m[1], od_m[1])})
-        '''
-        # od-->pid
-        # 边的权重真的重要吗？？？
-        # 源节点特征定义为'ft'
-        od_pid_g.srcdata.update({'ft': od_h})
-        # 向'srt_dst_type'中输入权重信息(使用频率)
-        od_pid_g.edata['srt_dst_type'] = torch.FloatTensor(pid_od_count)
-        # print("g.edges['srt_dst_type'] =", g_o_d.edges['srt_dst_type'])
-        # 将源节点特征与边特征相乘可得目标节点更新后的特征
-        od_pid_g.update_all(fn.u_mul_e('ft', 'srt_dst_type', 'm'),
-                         fn.sum('m', 'ft'))
-        # 利用边权重处理过的目的节点特征<----更新部分
-        # -->这步操作，其实只给出了目标节点的更新部分，而源节点未发生变化
-        res_pid_h = od_pid_g.dstdata['ft']
-
-        # pid-->od
-        # 边上的权重真的有必要吗？？？
-        # 源节点特征定义为'ft'
-        pid_od_g.srcdata.update({'ft': pid_h})
-        # 向'srt_dst_type'中输入权重信息(使用频率)
-        pid_od_g.edata['srt_dst_type'] = torch.FloatTensor(pid_od_count)
-        # print("g.edges['srt_dst_type'] =", g_o_d.edges['srt_dst_type'])
-        # 将源节点特征与边特征相乘可得目标节点更新后的特征
-        pid_od_g.update_all(fn.u_mul_e('ft', 'srt_dst_type', 'm'),
-                            fn.sum('m', 'ft'))
-        # 利用边权重处理过的目的节点特征<----更新部分
-        # -->这步操作，其实只给出了目标节点的更新部分，而源节点未发生变化
-        res_od_h = pid_od_g.dstdata['ft']
-
-        # print("res_pid_h =", res_pid_h, res_pid_h.shape)
-        # print("res_od_h =", res_od_h, res_od_h.shape)
-
-        # 线性变化：恢复pid_h,od_h维度
-        pid_h = self.recover_pid_D(res_pid_h)
-        # print("pid_h =", pid_h, pid_h.shape)
-        od_h = self.recover_od_D(res_od_h)
-        # print("od_h =", od_h, od_h.shape)
-        '''
 
         # 更新pid节点特征:od-->pid
         res0 = self.od_pid_gat(od_pid_g, (od_h, pid_h))
@@ -532,39 +321,17 @@ class HAN(nn.Module):
 
         # 线性变化：恢复pid_h,od_h维度
         pid_h = self.recover_pid_D(res0)
-        # print("pid_h =", pid_h, pid_h.shape)
         od_h = self.recover_od_D(res1)
-        # print("od_h =", od_h, od_h.shape)
 
         # 构建二部图-->重新利用图注意力学习mode节点特征
         pid_g = dgl.heterograph({('srt_type', 'srt_dst_type', 'dst_type'): (pid_m[1], pid_m[2])})
-        # print("pid_g =", pid_g)
         # 构建二部图-->重新利用图注意力学习节点特征
         od_g = dgl.heterograph({('srt_type', 'srt_dst_type', 'dst_type'): (od_m[1], od_m[2])})
         # 异构网络中节点预测-->基于异构节点
         m_h = self.nodetype_nn(temp_h, pid_g, pid_h, od_g, od_h)
-        # print("res =", m_h, m_h.shape)
 
         # 目标节点特征合并形式-->简单拼接
         h = torch.cat((m_h, h), 1)
-
-        # Hybrid_list = []
-        # Hybrid_list.append(m_h)
-        # Hybrid_list.append(h)
-        # hybrid_embedding = torch.stack(Hybrid_list, dim=1)
-        # print("hybrid_embedding =", hybrid_embedding, hybrid_embedding.shape)
-        # h = self.Hybrid_attention(hybrid_embedding)
-        '''
-        # 实现MLP
-        h = self.predict0(h)  # 数据量x1500
-        # THAN是有这个操作的（激活函数，归一化等）
-        
-        h = self.Ba0(h)
-        h = F.relu(h)
-        # h = torch.tanh(h)
-        h = F.softmax(h, dim=1)
-        h = self.Dr0(h)
-        '''
         # 实现MLP-->训练出来的两个信息进行连接
         h = self.predict1(h)  # 数据量
         # THAN是有这个操作的（激活函数，归一化等）
