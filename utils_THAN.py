@@ -150,6 +150,7 @@ def get_binary_mask(total_size, indices):
 def load_mydata_raw(remove_self_loop):  ####################################
     assert not remove_self_loop
     data_path = get_download_dir() + '/mydataset.mat'
+    print("mydataset.mat put in:", data_path)
     data = sio.loadmat(data_path)
     p_vs_l = data['PvsL']  # paper-field? 文章领域
     p_vs_a = data['PvsA']  # paper-author 文章作者
