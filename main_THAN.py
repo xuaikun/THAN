@@ -74,9 +74,6 @@ def evaluate(model, g, o_d_g, d_o_g, features, pid_features, o_features, d_featu
     labels_new = labels[mask]
     labels_new = labels_new.cpu().numpy()
 
-    # print("prediction =", prediction)
-    # print("labels_new =", labels_new)
-
     return loss, accuracy, micro_f1, macro_f1, f1_weighted, Pre, Rec, NDCG, f_score, labels_new, prediction
 
 def main(args):
