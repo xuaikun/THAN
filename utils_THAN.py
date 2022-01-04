@@ -459,7 +459,7 @@ def load_mydata_raw(remove_self_loop):  ####################################
     d_list = d_list[:num]
     # o->d
     o_d_g = dgl.heterograph({('srt_type', 'srt_dst_type', 'dst_type'): (o_list, d_list)})
-    h = o_d_g.dstdata['ft']
+    # h = o_d_g.dstdata['ft']
 
     # d->o
     d_o_g = dgl.heterograph({('srt_type', 'srt_dst_type', 'dst_type'): (d_list, o_list)})
