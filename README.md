@@ -11,4 +11,5 @@ change "args['device'] = 'cuda:0' if torch.cuda.is_available() else 'cpu'"
 to
 
 args['device'] = 'cpu'
-  
+
+in define setup()
