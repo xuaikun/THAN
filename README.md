@@ -13,3 +13,5 @@ to
 args['device'] = 'cpu'
 
 in def setup()
+
+also in def setup_for_sampling()
