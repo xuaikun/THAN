@@ -12,4 +12,4 @@ to
 
 args['device'] = 'cpu'
 
-in define setup()
+in def setup()
